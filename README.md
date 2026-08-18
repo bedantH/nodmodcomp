@@ -6,10 +6,9 @@ archive, then restores it when the project is needed again.
 It is intended for developers who keep many JavaScript projects locally and do
 not want inactive `node_modules` directories consuming disk space.
 
-## Why we built it
+## Why ?
 
-JavaScript dependencies can occupy hundreds of megabytes—or several
-gigabytes—per project. When many projects are checked out at once, their
+JavaScript dependencies can occupy hundreds of megabytes or several gigabytes per project. When many projects are checked out at once, their
 `node_modules` directories can consume a large part of a development machine's
 storage even though most of those projects are inactive.
 
