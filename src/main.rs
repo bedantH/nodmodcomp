@@ -46,21 +46,46 @@ pub enum Commands {
 }
 
 impl NodModCompCLI {
-    pub async fn run(&self) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn run(
+        &self,
+    ) -> Result<Option<std::process::ExitStatus>, Box<dyn std::error::Error>> {
         match &self.command {
-            Commands::Pack => commands::pack::run().await,
-            Commands::Unpack => commands::unpack::run().await,
-            Commands::Run { command } => commands::run::run(command).await,
-            Commands::Hibernate { path, dry_run } => commands::hibernate::run(path, *dry_run),
-            Commands::Setup { force } => commands::setup::run(*force),
+            Commands::Pack => commands::pack::run().await.map(|()| None),
+            Commands::Unpack => commands::unpack::run().await.map(|()| None),
+            Commands::Run { command } => commands::run::run(command).await.map(Some),
+            Commands::Hibernate { path, dry_run } => {
+                commands::hibernate::run(path, *dry_run).map(|()| None)
+            }
+            Commands::Setup { force } => commands::setup::run(*force).map(|()| None),
         }
     }
+}
+
+fn exit_code(status: std::process::ExitStatus) -> i32 {
+    if let Some(code) = status.code() {
+        return code;
+    }
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+
+        status.signal().map_or(1, |signal| 128 + signal)
+    }
+
+    #[cfg(not(unix))]
+    1
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = NodModCompCLI::parse();
-    cli.run().await?;
+
+    if let Some(status) = cli.run().await?
+        && !status.success()
+    {
+        std::process::exit(exit_code(status));
+    }
 
     Ok(())
 }

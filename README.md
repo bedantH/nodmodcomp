@@ -3,6 +3,11 @@
 `nodmodcomp` hibernates a project's `node_modules` directory into a compressed
 archive, then restores it when the project is needed again.
 
+The recommended workflow uses two high-level commands: `hibernate` puts an
+inactive project into storage, and `run` temporarily restores its dependencies,
+runs a command, and cleans them up again. The lower-level `pack` and `unpack`
+commands remain available when manual control is needed.
+
 It is intended for developers who keep many JavaScript projects locally and do
 not want inactive `node_modules` directories consuming disk space.
 
@@ -102,86 +107,81 @@ you to approve the binary before its first run.
 
 ## Quick start
 
-### Hibernate the current project
+### Hibernate a project
 
-Run `pack` inside a project that contains both `package.json` and
-`node_modules`:
+Use the high-level `hibernate` command when you are finished working on a
+project or you want to archive an old one. Pass either the project path or `.` for the current directory:
 
 ```sh
 cd my-project
-nodmodcomp pack
+nodmodcomp hibernate .
 ```
 
 After the archive and metadata sidecar have been written successfully,
 `node_modules` is removed.
 
-### Restore the current project
-
-```sh
-cd my-project
-nodmodcomp unpack
-```
-
-After a successful restore, the archive and its metadata sidecar are removed.
-
-### Restore and run a command
-
-Use `run` when you want the project restored automatically before executing a
-development command:
-
-```sh
-nodmodcomp run -- npm run dev
-```
-
-If `node_modules` is absent and `node_modules.pack` exists, `nodmodcomp`
-unpacks it first. It then replaces itself with the requested command on Unix,
-so terminal input, signals, and the command's exit status behave normally.
-
-If no archive exists, the command is still executed. Any missing-dependency
-error therefore comes from the requested command or package manager.
-
-`run` does not repack the project when the command exits.
-
-### Hibernate another project
-
-The `hibernate` command accepts a project path:
+You can also hibernate a project without changing directories:
 
 ```sh
 nodmodcomp hibernate /path/to/my-project
 ```
 
-Preview the operation without modifying anything:
+Preview the operation without changing the project:
 
 ```sh
 nodmodcomp hibernate --dry-run /path/to/my-project
 ```
 
+### Resume work with automatic cleanup
+
+Use the high-level `run` command instead of manually unpacking the project:
+
+```sh
+cd my-project
+nodmodcomp run -- npm run dev
+```
+
+If `node_modules` is absent and `node_modules.pack` exists, `nodmodcomp`
+unpacks it first. It then runs the requested command with normal terminal input,
+waits for it to exit, and automatically packs `node_modules` again. This removes
+the restored directory and leaves the project hibernated after the command
+finishes, including when the command returns a non-zero exit status.
+
+`run` tracks whether it performed the restore. If `node_modules` was already
+unpacked, it runs the command directly, prints a skip message, and leaves the
+directory unpacked instead of unexpectedly cleaning up user-managed state. The
+command's exit status is preserved in both cases.
+
+If no archive exists, the command is still executed. Any missing-dependency
+error therefore comes from the requested command or package manager, and `run`
+does not attempt to pack afterward because it did not restore anything.
+
 ## Commands
 
-### `nodmodcomp pack`
+`hibernate` and `run` are the recommended high-level orchestrators. They use
+the same packing and unpacking operations exposed by the individual `pack` and
+`unpack` commands.
 
-Compresses the current project's `node_modules`, writes the package metadata
-sidecar, and removes the original directory after both outputs are safely in
-place.
+### `nodmodcomp hibernate [--dry-run] <path>`
 
-The command refuses to overwrite an existing archive, sidecar, or temporary
-output.
+High-level entry point for putting an inactive project into compressed local
+storage. It validates the project path and `package.json`, then performs the
+same safe packing operation as `pack`.
 
-### `nodmodcomp unpack`
-
-Restores `node_modules.pack` in the current directory. It warns if the current
-`package.json` differs from the snapshot, but continues after the warning.
-
-It also continues with a warning if the sidecar is missing or unreadable. This
-supports archives made before sidecar metadata was introduced.
-
-The command refuses to unpack over an existing `node_modules` directory.
+Use `--dry-run` to inspect what would be packed without modifying the project.
 
 ### `nodmodcomp run -- <command> [arguments...]`
 
-Restores the current project when necessary, then executes the supplied
-command. The `--` clearly separates `nodmodcomp` arguments from the child
-command and is recommended.
+High-level entry point for working with a hibernated project. It orchestrates
+the complete lifecycle:
+
+1. Restore `node_modules` when a packed archive is present.
+2. Run the supplied command and wait for it to exit.
+3. Repack and remove `node_modules` only when `run` performed the restore.
+4. Return the supplied command's exit status.
+
+The `--` clearly separates `nodmodcomp` arguments from the child command and is
+recommended.
 
 Examples:
 
@@ -192,10 +192,28 @@ nodmodcomp run -- yarn build
 nodmodcomp run -- npx vite
 ```
 
-### `nodmodcomp hibernate [--dry-run] <path>`
+### `nodmodcomp pack`
 
-Runs the same packing implementation as `pack`, but for the specified project
-directory. Use `--dry-run` to inspect what would be packed.
+Lower-level command for manually compressing the current project's
+`node_modules`. It writes the package metadata sidecar and removes the original
+directory after both outputs are safely in place.
+
+The command refuses to overwrite an existing archive, sidecar, or temporary
+output. Prefer `hibernate <path>` for the normal project-hibernation workflow.
+
+### `nodmodcomp unpack`
+
+Lower-level command for manually restoring `node_modules.pack` in the current
+directory. It warns if the current `package.json` differs from the snapshot,
+but continues after the warning.
+
+It also continues with a warning if the sidecar is missing or unreadable. This
+supports archives made before sidecar metadata was introduced.
+
+The command refuses to unpack over an existing `node_modules` directory.
+Use `run -- <command>` for the normal restore-run-cleanup workflow; use
+`unpack` when you intentionally want the dependency directory to remain
+available afterward.
 
 ### `nodmodcomp setup [--force]`
 
@@ -250,7 +268,8 @@ should not be committed:
   system, CPU architecture, and sometimes system libraries. Do not assume an
   archive created on one machine will work on another.
 - The archive captures installed files, not package-manager cache state.
-- `run` restores dependencies but does not automatically hibernate them again.
+- `run` automatically re-hibernates dependencies only when it restored them.
+  If `node_modules` was already unpacked, `run` leaves it unchanged.
 - The project is currently early-stage software.
 
 ## Development
